@@ -142,6 +142,7 @@ export async function runSync(
 		let buf = "";
 
 		let processClosed = false;
+		let exitTimer: ReturnType<typeof setTimeout> | null = null;
 
 		const fireUpdate = () => {
 			if (!onUpdate || processClosed) return;
@@ -196,6 +197,22 @@ export async function runSync(
 						if (!result.model && evt.message.model) result.model = evt.message.model;
 						if (evt.message.errorMessage) result.error = evt.message.errorMessage;
 
+						// Defensive timeout: if the agent finished (stopReason "stop" or "end")
+						// but the child process doesn't exit within 10s, force-kill it.
+						// This handles extensions that leak child processes or open handles
+						// (e.g., LSP servers, MCP clients) preventing Node.js from exiting.
+						const stop = evt.message.stopReason;
+						if ((stop === "stop" || stop === "end") && !exitTimer && !processClosed) {
+							exitTimer = setTimeout(() => {
+								if (!processClosed) {
+									proc.kill("SIGTERM");
+									setTimeout(() => {
+										if (!processClosed) proc.kill("SIGKILL");
+									}, 3000);
+								}
+							}, 10_000);
+						}
+
 						const text = extractTextFromContent(evt.message.content);
 						if (text) {
 							const lines = text
@@ -246,6 +263,7 @@ export async function runSync(
 		});
 		proc.on("close", (code) => {
 			processClosed = true;
+			if (exitTimer) { clearTimeout(exitTimer); exitTimer = null; }
 			if (buf.trim()) processLine(buf);
 			if (code !== 0 && stderrBuf.trim() && !result.error) {
 				result.error = stderrBuf.trim();
