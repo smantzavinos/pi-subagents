@@ -275,7 +275,7 @@ export async function runSync(
 		if (signal) {
 			const kill = () => {
 				proc.kill("SIGTERM");
-				setTimeout(() => !proc.killed && proc.kill("SIGKILL"), 3000);
+				setTimeout(() => !processClosed && proc.kill("SIGKILL"), 3000);
 			};
 			if (signal.aborted) kill();
 			else signal.addEventListener("abort", kill, { once: true });
